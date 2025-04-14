@@ -1,77 +1,95 @@
-import React from 'react';
-import Navbar from '../components/Navbar';
+import React, { useEffect, useState } from 'react';
 import BugForm from '../components/BugForm';
 import BugList from '../components/BugList';
 import BugStats from '../components/BugStats';
 import BugTrendChart from '../components/BugTrendChart';
 import SmartSuggestions from '../components/SmartSuggestions';
-import ProfileWidget from '../components/ProfileWidget';
+import { useAuth } from '../context/AuthContext';
+import { db } from '../firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { ToastContainer, toast } from 'react-toastify'; // 🔔
+import 'react-toastify/dist/ReactToastify.css'; // 🔔
 
 export default function Dashboard() {
+  const { user } = useAuth();
+  const [preferences, setPreferences] = useState(null);
+  const [loadingPrefs, setLoadingPrefs] = useState(true);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchPreferences = async () => {
+      try {
+        const docRef = doc(db, "userPreferences", user.uid);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const prefs = docSnap.data();
+          setPreferences(prefs);
+
+          // 🔔 Show welcome toast if notifications are enabled
+          if (prefs.notificationsEnabled) {
+            toast.success(`Welcome back, ${user.email}! 🔔 Notifications are enabled.`);
+          }
+        } else {
+          setPreferences({ bugFilterDefault: 'All' }); // fallback
+        }
+      } catch (error) {
+        console.error("Error fetching preferences:", error);
+        setPreferences({ bugFilterDefault: 'All' }); // fallback on error
+      } finally {
+        setLoadingPrefs(false);
+      }
+    };
+
+    fetchPreferences();
+  }, [user]);
+
+  if (loadingPrefs || !preferences) {
+    return <div className="p-6 text-gray-600 dark:text-gray-300">Loading preferences...</div>;
+  }
+
   return (
-    <div className="flex min-h-screen">
-      {/* Left Sidebar: Navbar + Profile */}
-      <aside className="w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col justify-between">
-        <div>
-          <Navbar />
+    <>
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <div className="lg:col-span-3 space-y-12">
+          <header>
+            <h1 className="text-4xl font-bold mb-2">🐞 BugTrackr Dashboard</h1>
+            <p className="text-lg text-gray-700 dark:text-gray-300">
+              Track, manage, and squash bugs effectively!
+            </p>
+          </header>
+
+          <section aria-labelledby="bug-form-heading">
+            <h2 id="bug-form-heading" className="text-2xl font-semibold mb-4">
+              Submit a New Bug
+            </h2>
+            <BugForm />
+          </section>
+
+          <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <h2 className="text-2xl font-semibold mb-4">Bug Summary</h2>
+              <BugStats />
+            </div>
+            <div>
+              <h2 className="text-2xl font-semibold mb-4">Bug Submission Trends</h2>
+              <BugTrendChart />
+            </div>
+          </section>
+
+          <section>
+            <h2 className="text-2xl font-semibold mb-4">Your Reported Bugs</h2>
+            <BugList initialFilter={preferences.bugFilterDefault || 'All'} />
+          </section>
         </div>
-        <div className="p-4">
-          <ProfileWidget />
-        </div>
-      </aside>
 
-      {/* Main content */}
-      <main className="flex-1 overflow-y-auto bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-4 md:p-6">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Left Section */}
-          <div className="lg:col-span-3 space-y-12">
-            {/* Header */}
-            <header>
-              <h1 className="text-4xl font-bold mb-2">🐞 BugTrackr Dashboard</h1>
-              <p className="text-lg text-gray-700 dark:text-gray-300">
-                Track, manage, and squash bugs effectively!
-              </p>
-            </header>
+        <aside className="lg:col-span-1 space-y-6">
+          <SmartSuggestions />
+        </aside>
+      </div>
 
-            {/* Bug Submission */}
-            <section aria-labelledby="bug-form-heading">
-              <h2 id="bug-form-heading" className="text-2xl font-semibold mb-4">
-                Submit a New Bug
-              </h2>
-              <BugForm />
-            </section>
-
-            {/* Stats and Trends */}
-            <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div aria-labelledby="bug-stats-heading">
-                <h2 id="bug-stats-heading" className="text-2xl font-semibold mb-4">
-                  Bug Summary
-                </h2>
-                <BugStats />
-              </div>
-              <div aria-labelledby="trend-heading">
-                <h2 id="trend-heading" className="text-2xl font-semibold mb-4">
-                  Bug Submission Trends
-                </h2>
-                <BugTrendChart />
-              </div>
-            </section>
-
-            {/* Bug List */}
-            <section aria-labelledby="bug-list-heading">
-              <h2 id="bug-list-heading" className="text-2xl font-semibold mb-4">
-                Your Reported Bugs
-              </h2>
-              <BugList />
-            </section>
-          </div>
-
-          {/* Right Sidebar */}
-          <aside className="lg:col-span-1 space-y-6">
-            <SmartSuggestions />
-          </aside>
-        </div>
-      </main>
-    </div>
+      {/* 🔔 Toast container must be rendered once */}
+      <ToastContainer position="top-right" autoClose={5000} />
+    </>
   );
 }

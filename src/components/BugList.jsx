@@ -1,4 +1,3 @@
-// src/components/BugList.jsx
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -9,25 +8,53 @@ import {
   doc,
   updateDoc,
   deleteDoc,
+  getDoc,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import {
+  Dialog,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
 export default function BugList() {
   const { user } = useAuth();
   const [bugs, setBugs] = useState([]);
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState(null); // Start as null while loading
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedBug, setSelectedBug] = useState(null);
+  const [loading, setLoading] = useState(true);
 
+  // Fetch bugs and user preferences
   useEffect(() => {
     if (!user) return;
 
-    const q = query(collection(db, 'bugs'), where('userId', '==', user.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const bugData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      setBugs(bugData);
-    });
+    const fetchData = async () => {
+      try {
+        // 1. Fetch user preferences
+        const prefDoc = await getDoc(doc(db, 'userPreferences', user.uid));
+        const userPrefs = prefDoc.exists() ? prefDoc.data() : {};
+        setFilter(userPrefs.bugFilterDefault?.toLowerCase() || 'all');
 
-    return () => unsubscribe();
+        // 2. Set up real-time bug listener
+        const q = query(collection(db, 'bugs'), where('userId', '==', user.uid));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+          const bugData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+          setBugs(bugData);
+          setLoading(false);
+        });
+
+        return () => unsubscribe();
+      } catch (error) {
+        console.error("Error loading bugs or preferences:", error);
+      }
+    };
+
+    fetchData();
   }, [user]);
 
   const handleResolve = async (id) => {
@@ -38,6 +65,7 @@ export default function BugList() {
   const handleDelete = async (id) => {
     const bugRef = doc(db, 'bugs', id);
     await deleteDoc(bugRef);
+    setSelectedBug(null);
   };
 
   const filteredBugs = bugs
@@ -47,6 +75,10 @@ export default function BugList() {
         bug.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         bug.description.toLowerCase().includes(searchTerm.toLowerCase())
     );
+
+  if (loading || filter === null) {
+    return <div className="p-6 text-gray-600 dark:text-gray-300">Loading bugs...</div>;
+  }
 
   return (
     <div>
@@ -84,7 +116,8 @@ export default function BugList() {
           filteredBugs.map((bug) => (
             <div
               key={bug.id}
-              className="bg-white dark:bg-gray-800 shadow-md rounded-xl p-4 border-l-4 transition-all border-blue-400"
+              onClick={() => setSelectedBug(bug)}
+              className="bg-white dark:bg-gray-800 shadow-md rounded-xl p-4 border-l-4 transition-all border-blue-400 cursor-pointer hover:shadow-lg"
             >
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-lg font-semibold">{bug.title}</h3>
@@ -104,18 +137,23 @@ export default function BugList() {
                 Submitted on {new Date(bug.createdAt?.toDate()).toLocaleString()}
               </p>
 
-              {/* Actions */}
               <div className="mt-4 flex space-x-2">
                 {bug.status === 'open' && (
                   <button
-                    onClick={() => handleResolve(bug.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleResolve(bug.id);
+                    }}
                     className="px-3 py-1 text-sm bg-green-600 hover:bg-green-700 text-white rounded-full"
                   >
                     Mark as Resolved
                   </button>
                 )}
                 <button
-                  onClick={() => handleDelete(bug.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDelete(bug.id);
+                  }}
                   className="px-3 py-1 text-sm bg-red-600 hover:bg-red-700 text-white rounded-full"
                 >
                   Delete
@@ -125,6 +163,40 @@ export default function BugList() {
           ))
         )}
       </div>
+
+      {/* Bug Detail Modal */}
+      <Dialog open={!!selectedBug} onOpenChange={(open) => !open && setSelectedBug(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{selectedBug?.title}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <p className="text-sm">{selectedBug?.description}</p>
+            <p className="text-sm">
+              <strong>Status:</strong>{' '}
+              <span
+                className={`px-2 py-1 rounded text-white text-xs ${
+                  selectedBug?.status === 'resolved' ? 'bg-green-600' : 'bg-red-600'
+                }`}
+              >
+                {selectedBug?.status}
+              </span>
+            </p>
+            <p className="text-sm">
+              <strong>Priority:</strong> {selectedBug?.priority || 'N/A'}
+            </p>
+            <p className="text-sm text-gray-500">
+              <strong>Submitted:</strong>{' '}
+              {selectedBug?.createdAt?.toDate().toLocaleString()}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSelectedBug(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
