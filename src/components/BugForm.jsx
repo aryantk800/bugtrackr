@@ -57,18 +57,42 @@ const BugForm = () => {
 
     let assignedUser = null;
 
-    if (assignMode === 'manual' && assignTo) {
-      assignedUser = usersList.find((u) => u.uid === assignTo);
-      if (assignTo === 'self') {
-        assignedUser = { uid: user.uid, email: user.email };
-      }
-    } else {
-      assignedUser = autoAssignUser() || { uid: user.uid, email: user.email };
-    }
-
     try {
-        await addDoc(collection(db, 'bugs'), {
+      if (assignMode === 'manual') {
+        if (assignTo === 'self') {
+          assignedUser = {
+            uid: user.uid,
+            email: user.email,
+            assignedBugCount: 0,
+          };
+        } else {
+          assignedUser = usersList.find((u) => u.uid === assignTo);
+        }
+      } else {
+        // Auto mode
+        if (usersList.length === 1) {
+          assignedUser = {
+            uid: user.uid,
+            email: user.email,
+            assignedBugCount: 0,
+          };
+        } else {
+          assignedUser = autoAssignUser();
+        }
+      }
 
+      // Fallback to self if no one found
+      if (!assignedUser || !assignedUser.email) {
+        assignedUser = {
+          uid: user.uid,
+          email: user.email ?? 'unknown@example.com',
+          assignedBugCount: 0,
+        };
+      }
+      
+
+      // Add new bug
+      await addDoc(collection(db, 'bugs'), {
         title,
         description,
         priority,
@@ -79,27 +103,34 @@ const BugForm = () => {
         assignedEmail: assignedUser.email,
       });
 
+      // Increment assignedBugCount if not self
       if (assignedUser.uid !== user.uid) {
         await updateDoc(doc(db, 'users', assignedUser.uid), {
           assignedBugCount: increment(1),
         });
       }
 
-      // ✅ Email notification
+      // Email Notification
       await notifyByEmail({
         to: assignedUser.email,
         subject: `🐞 New Bug Assigned: ${title}`,
-        message: `Hi ${assignedUser.email},\n\nYou've been assigned a new bug:\n\nTitle: ${title}\nPriority: ${priority}\n\nView it in BugTrackr.`
+        message: `Hi ${assignedUser.email},\n\nYou've been assigned a new bug:\n\nTitle: ${title}\nPriority: ${priority}\n\nView it in BugTrackr.`,
       });
 
       setTitle('');
       setDescription('');
       setPriority('medium');
       setAssignTo('');
-      alert('Bug submitted!');
+
+      alert(`🐞 Bug submitted and assigned to: ${assignedUser.email}`);
     } catch (error) {
-      console.error('Error adding bug:', error);
-      alert('Failed to submit bug.');
+      console.error('Error submitting bug:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+        error
+      });
+      alert(`Failed to submit bug: ${error.message}`);
     }
   };
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
   collection,
@@ -28,68 +28,98 @@ export default function BugList() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedBug, setSelectedBug] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const bugStore = useRef({}); // 🔒 Shared bug storage across listeners
 
+  // 1️⃣ Load user preferences FIRST
   useEffect(() => {
     if (!user) return;
 
-    const fetchData = async () => {
-      try {
-        // 1. Get user preferences
-        const prefDoc = await getDoc(doc(db, 'userPreferences', user.uid));
-        const userPrefs = prefDoc.exists() ? prefDoc.data() : {};
-        setFilter(userPrefs.bugFilterDefault?.toLowerCase() || 'all');
-
-        // 2. Listen to bugs reported by user
-        const reportedQuery = query(collection(db, 'bugs'), where('userId', '==', user.uid));
-        const assignedQuery = query(collection(db, 'bugs'), where('assignedTo', '==', user.uid));
-
-        const allBugs = {};
-
-        const unsubReport = onSnapshot(reportedQuery, (snapshot) => {
-          snapshot.forEach((doc) => {
-            allBugs[doc.id] = { id: doc.id, ...doc.data(), assigned: false };
-          });
-          updateBugList();
-        });
-
-        const unsubAssigned = onSnapshot(assignedQuery, (snapshot) => {
-          snapshot.forEach((doc) => {
-            // Mark assigned true if it's not already present
-            if (!allBugs[doc.id]) {
-              allBugs[doc.id] = { id: doc.id, ...doc.data(), assigned: true };
-            } else {
-              allBugs[doc.id].assigned = true;
-            }
-          });
-          updateBugList();
-        });
-
-        const updateBugList = () => {
-          const bugArray = Object.values(allBugs);
-          setBugs(bugArray);
-          setLoading(false);
-        };
-
-        return () => {
-          unsubReport();
-          unsubAssigned();
-        };
-      } catch (error) {
-        console.error('Error loading bugs:', error);
-      }
+    const fetchPreferences = async () => {
+      const prefDoc = await getDoc(doc(db, 'userPreferences', user.uid));
+      const prefs = prefDoc.exists() ? prefDoc.data() : {};
+      const defaultFilter = prefs?.bugFilterDefault?.toLowerCase() || 'all';
+      setFilter(defaultFilter);
+      setPreferencesLoaded(true); // 🔓 Unlock rendering
     };
 
-    fetchData();
+    fetchPreferences();
   }, [user]);
 
-  const handleResolve = async (id) => {
-    await updateDoc(doc(db, 'bugs', id), { status: 'resolved' });
+  // 2️⃣ Only set up listeners once preferences are loaded
+  useEffect(() => {
+    if (!user || !preferencesLoaded) return;
+
+    const reportedQuery = query(collection(db, 'bugs'), where('userId', '==', user.uid));
+    const assignedQuery = query(collection(db, 'bugs'), where('assignedTo', '==', user.uid));
+
+    const unsubReport = onSnapshot(reportedQuery, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        const bug = { id: change.doc.id, ...change.doc.data(), assigned: false };
+        if (change.type === 'removed') {
+          delete bugStore.current[bug.id];
+        } else {
+          bugStore.current[bug.id] = bug;
+        }
+      });
+      updateBugList();
+    });
+    const unsubAssigned = onSnapshot(assignedQuery, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        const bug = { id: change.doc.id, ...change.doc.data(), assigned: true };
+        if (change.type === 'removed') {
+          if (bugStore.current[bug.id]) {
+            bugStore.current[bug.id].assigned = false;
+          }
+        } else {
+          bugStore.current[bug.id] = {
+            ...(bugStore.current[bug.id] || bug),
+            assigned: true,
+          };
+        }
+      });
+      updateBugList();
+    });
+
+    return () => {
+      unsubReport();
+      unsubAssigned();
+    };
+  }, [user, preferencesLoaded]);
+
+  const updateBugList = () => {
+    setBugs(Object.values(bugStore.current));
+    setLoading(false);
   };
 
-  const handleDelete = async (id) => {
-    await deleteDoc(doc(db, 'bugs', id));
-    setSelectedBug(null);
+  const handleResolve = async (id) => {
+    try {
+      await updateDoc(doc(db, 'bugs', id), { status: 'resolved' });
+  
+      // ✅ Update local bug state immediately
+      if (bugStore.current[id]) {
+        bugStore.current[id].status = 'resolved';
+        updateBugList();
+      }
+    } catch (error) {
+      console.error('Error resolving bug:', error);
+    }
   };
+  
+  const handleDelete = async (id) => {
+    try {
+      await deleteDoc(doc(db, 'bugs', id));
+  
+      // ✅ Remove from local state immediately
+      delete bugStore.current[id];
+      updateBugList();
+  
+      setSelectedBug(null);
+    } catch (error) {
+      console.error('Error deleting bug:', error);
+    }
+  };
+  
 
   const filteredBugs = bugs
     .filter((bug) => filter === 'all' || bug.status === filter)
@@ -99,13 +129,13 @@ export default function BugList() {
         bug.description.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-  if (loading || filter === null) {
+  if (loading || !preferencesLoaded || filter === null) {
     return <div className="p-6 text-gray-600 dark:text-gray-300">Loading bugs...</div>;
   }
 
   return (
     <div>
-      {/* 🔍 Search */}
+      {/* Search */}
       <input
         type="text"
         placeholder="Search bugs..."
@@ -114,7 +144,7 @@ export default function BugList() {
         onChange={(e) => setSearchTerm(e.target.value)}
       />
 
-      {/* Filter Tabs */}
+      {/* Filter Buttons */}
       <div className="flex space-x-4 mb-6">
         {['all', 'open', 'resolved'].map((f) => (
           <button
