@@ -3,6 +3,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";
+import DevTools from "./pages/DevTools"; // ✅ Imported DevTools
 import Layout from "./components/Layout";
 import { AuthProvider } from "./context/AuthContext";
 import { ThemeProvider } from "./context/ThemeContext";
@@ -16,6 +17,9 @@ function App() {
             <Route path="/" element={<Login />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+
+            {/* ✅ DevTools route for testing/debugging */}
+            <Route path="/devtools" element={<DevTools />} />
 
             {/* ✅ Protected layout routes */}
             <Route element={<Layout />}>
