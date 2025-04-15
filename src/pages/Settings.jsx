@@ -11,8 +11,6 @@ function Settings() {
 
   const defaultPrefs = {
     bugFilterDefault: "All",
-    notificationsEnabled: true,
-    aiSuggestions: true,
   };
 
   const [preferences, setPreferences] = useState(defaultPrefs);
@@ -27,8 +25,11 @@ function Settings() {
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           const data = docSnap.data();
-          setPreferences(data);
-          setTempPrefs(data);
+          const filtered = {
+            bugFilterDefault: data.bugFilterDefault || "All",
+          };
+          setPreferences(filtered);
+          setTempPrefs(filtered);
         }
       } catch (error) {
         console.error("Error fetching preferences:", error);
@@ -91,40 +92,6 @@ function Settings() {
             <option value="Open">Open</option>
             <option value="Resolved">Resolved</option>
           </select>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 p-4 rounded shadow">
-          <h3 className="text-lg font-semibold mb-2">Notifications</h3>
-          <label className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              checked={tempPrefs.notificationsEnabled}
-              onChange={(e) =>
-                setTempPrefs({
-                  ...tempPrefs,
-                  notificationsEnabled: e.target.checked,
-                })
-              }
-            />
-            <span>Enable email alerts</span>
-          </label>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 p-4 rounded shadow">
-          <h3 className="text-lg font-semibold mb-2">Smart Suggestions & AI</h3>
-          <label className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              checked={tempPrefs.aiSuggestions}
-              onChange={(e) =>
-                setTempPrefs({
-                  ...tempPrefs,
-                  aiSuggestions: e.target.checked,
-                })
-              }
-            />
-            <span>Enable smart prioritization</span>
-          </label>
         </div>
       </div>
 

@@ -10,29 +10,26 @@ import {
   increment
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../context/AuthContext';
 
 const BugForm = () => {
   const { user } = useAuth();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState('medium');
+  const [assignMode, setAssignMode] = useState('auto');
   const [assignTo, setAssignTo] = useState('');
   const [usersList, setUsersList] = useState([]);
-  const [assignMode, setAssignMode] = useState('auto'); // 'auto' | 'manual'
 
   useEffect(() => {
     const fetchUsers = async () => {
       const querySnapshot = await getDocs(collection(db, 'users'));
-      const users = querySnapshot.docs
-        .map((doc) => ({ uid: doc.id, ...doc.data() }))
-        .filter((u) => u.uid !== user.uid); // Exclude self for auto-assign
+      const users = querySnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }))
+        .filter(u => u.uid !== user.uid);
       setUsersList(users);
     };
 
-    if (user) {
-      fetchUsers();
-    }
+    if (user) fetchUsers();
   }, [user]);
 
   const autoAssignUser = () => {
@@ -43,11 +40,9 @@ const BugForm = () => {
   const notifyByEmail = async ({ to, subject, message }) => {
     try {
       const sendBugNotification = httpsCallable(functions, 'sendBugNotification');
-      const result = await sendBugNotification({ to, subject, message });
-      return result.data;
+      await sendBugNotification({ to, subject, message });
     } catch (error) {
-      console.error('Notification error:', error);
-      return { success: false, error: error.message };
+      console.error('Email notification error:', error);
     }
   };
 
@@ -57,41 +52,25 @@ const BugForm = () => {
 
     let assignedUser = null;
 
-    try {
-      if (assignMode === 'manual') {
-        if (assignTo === 'self') {
-          assignedUser = {
-            uid: user.uid,
-            email: user.email,
-            assignedBugCount: 0,
-          };
-        } else {
-          assignedUser = usersList.find((u) => u.uid === assignTo);
-        }
+    if (assignMode === 'manual') {
+      if (assignTo === 'self') {
+        assignedUser = { uid: user.uid, email: user.email, assignedBugCount: 0 };
       } else {
-        // Auto mode
-        if (usersList.length === 1) {
-          assignedUser = {
-            uid: user.uid,
-            email: user.email,
-            assignedBugCount: 0,
-          };
-        } else {
-          assignedUser = autoAssignUser();
-        }
+        assignedUser = usersList.find(u => u.uid === assignTo);
       }
-
-      // Fallback to self if no one found
-      if (!assignedUser || !assignedUser.email) {
-        assignedUser = {
-          uid: user.uid,
-          email: user.email ?? 'unknown@example.com',
-          assignedBugCount: 0,
-        };
+    } else {
+      if (usersList.length === 1) {
+        assignedUser = { uid: user.uid, email: user.email, assignedBugCount: 0 };
+      } else {
+        assignedUser = autoAssignUser();
       }
-      
+    }
 
-      // Add new bug
+    if (!assignedUser || !assignedUser.email) {
+      assignedUser = { uid: user.uid, email: user.email, assignedBugCount: 0 };
+    }
+
+    try {
       await addDoc(collection(db, 'bugs'), {
         title,
         description,
@@ -101,36 +80,29 @@ const BugForm = () => {
         createdBy: user.uid,
         assignedTo: assignedUser.uid,
         assignedEmail: assignedUser.email,
+        userId: user.uid,
       });
 
-      // Increment assignedBugCount if not self
       if (assignedUser.uid !== user.uid) {
         await updateDoc(doc(db, 'users', assignedUser.uid), {
-          assignedBugCount: increment(1),
+          assignedBugCount: increment(1)
         });
       }
 
-      // Email Notification
       await notifyByEmail({
         to: assignedUser.email,
         subject: `🐞 New Bug Assigned: ${title}`,
-        message: `Hi ${assignedUser.email},\n\nYou've been assigned a new bug:\n\nTitle: ${title}\nPriority: ${priority}\n\nView it in BugTrackr.`,
+        message: `Hi ${assignedUser.email},\n\nYou’ve been assigned a new bug titled "${title}".`
       });
 
       setTitle('');
       setDescription('');
       setPriority('medium');
       setAssignTo('');
-
       alert(`🐞 Bug submitted and assigned to: ${assignedUser.email}`);
-    } catch (error) {
-      console.error('Error submitting bug:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name,
-        error
-      });
-      alert(`Failed to submit bug: ${error.message}`);
+    } catch (err) {
+      console.error('Error submitting bug:', err);
+      alert('Error submitting bug.');
     }
   };
 
@@ -165,7 +137,6 @@ const BugForm = () => {
         <option value="high">High</option>
       </select>
 
-      {/* Assignment Mode */}
       <div className="space-y-2">
         <label className="block font-medium dark:text-white">Assign To</label>
         <select
@@ -184,7 +155,7 @@ const BugForm = () => {
             className="border p-2 w-full dark:bg-gray-800 dark:text-white"
           >
             <option value="">Select user</option>
-            {usersList.map((u) => (
+            {usersList.map(u => (
               <option key={u.uid} value={u.uid}>
                 {u.email} ({u.role})
               </option>
@@ -194,10 +165,7 @@ const BugForm = () => {
         )}
       </div>
 
-      <button
-        type="submit"
-        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
-      >
+      <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
         Submit Bug
       </button>
     </form>
