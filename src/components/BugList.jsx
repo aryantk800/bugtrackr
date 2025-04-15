@@ -24,33 +24,58 @@ import { Button } from '@/components/ui/button';
 export default function BugList() {
   const { user } = useAuth();
   const [bugs, setBugs] = useState([]);
-  const [filter, setFilter] = useState(null); // Start as null while loading
+  const [filter, setFilter] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedBug, setSelectedBug] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Fetch bugs and user preferences
   useEffect(() => {
     if (!user) return;
 
     const fetchData = async () => {
       try {
-        // 1. Fetch user preferences
+        // 1. Get user preferences
         const prefDoc = await getDoc(doc(db, 'userPreferences', user.uid));
         const userPrefs = prefDoc.exists() ? prefDoc.data() : {};
         setFilter(userPrefs.bugFilterDefault?.toLowerCase() || 'all');
 
-        // 2. Set up real-time bug listener
-        const q = query(collection(db, 'bugs'), where('userId', '==', user.uid));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-          const bugData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-          setBugs(bugData);
-          setLoading(false);
+        // 2. Listen to bugs reported by user
+        const reportedQuery = query(collection(db, 'bugs'), where('userId', '==', user.uid));
+        const assignedQuery = query(collection(db, 'bugs'), where('assignedTo', '==', user.uid));
+
+        const allBugs = {};
+
+        const unsubReport = onSnapshot(reportedQuery, (snapshot) => {
+          snapshot.forEach((doc) => {
+            allBugs[doc.id] = { id: doc.id, ...doc.data(), assigned: false };
+          });
+          updateBugList();
         });
 
-        return () => unsubscribe();
+        const unsubAssigned = onSnapshot(assignedQuery, (snapshot) => {
+          snapshot.forEach((doc) => {
+            // Mark assigned true if it's not already present
+            if (!allBugs[doc.id]) {
+              allBugs[doc.id] = { id: doc.id, ...doc.data(), assigned: true };
+            } else {
+              allBugs[doc.id].assigned = true;
+            }
+          });
+          updateBugList();
+        });
+
+        const updateBugList = () => {
+          const bugArray = Object.values(allBugs);
+          setBugs(bugArray);
+          setLoading(false);
+        };
+
+        return () => {
+          unsubReport();
+          unsubAssigned();
+        };
       } catch (error) {
-        console.error("Error loading bugs or preferences:", error);
+        console.error('Error loading bugs:', error);
       }
     };
 
@@ -58,13 +83,11 @@ export default function BugList() {
   }, [user]);
 
   const handleResolve = async (id) => {
-    const bugRef = doc(db, 'bugs', id);
-    await updateDoc(bugRef, { status: 'resolved' });
+    await updateDoc(doc(db, 'bugs', id), { status: 'resolved' });
   };
 
   const handleDelete = async (id) => {
-    const bugRef = doc(db, 'bugs', id);
-    await deleteDoc(bugRef);
+    await deleteDoc(doc(db, 'bugs', id));
     setSelectedBug(null);
   };
 
@@ -82,7 +105,7 @@ export default function BugList() {
 
   return (
     <div>
-      {/* 🔍 Search Input */}
+      {/* 🔍 Search */}
       <input
         type="text"
         placeholder="Search bugs..."
@@ -108,7 +131,7 @@ export default function BugList() {
         ))}
       </div>
 
-      {/* Bug Cards */}
+      {/* Bug List */}
       <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
         {filteredBugs.length === 0 ? (
           <p className="text-gray-600 dark:text-gray-400">No bugs found.</p>
@@ -120,7 +143,14 @@ export default function BugList() {
               className="bg-white dark:bg-gray-800 shadow-md rounded-xl p-4 border-l-4 transition-all border-blue-400 cursor-pointer hover:shadow-lg"
             >
               <div className="flex items-center justify-between mb-1">
-                <h3 className="text-lg font-semibold">{bug.title}</h3>
+                <h3 className="text-lg font-semibold">
+                  {bug.title}{' '}
+                  {bug.assigned && (
+                    <span className="ml-2 text-xs bg-yellow-400 text-black px-2 py-0.5 rounded-full">
+                      Assigned to you
+                    </span>
+                  )}
+                </h3>
                 <span
                   className={`text-sm font-medium px-3 py-1 rounded-full ${
                     bug.status === 'resolved'
@@ -131,7 +161,6 @@ export default function BugList() {
                   {bug.status.toUpperCase()}
                 </span>
               </div>
-
               <p className="text-sm text-gray-700 dark:text-gray-300">{bug.description}</p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                 Submitted on {new Date(bug.createdAt?.toDate()).toLocaleString()}
@@ -164,7 +193,7 @@ export default function BugList() {
         )}
       </div>
 
-      {/* Bug Detail Modal */}
+      {/* Modal */}
       <Dialog open={!!selectedBug} onOpenChange={(open) => !open && setSelectedBug(null)}>
         <DialogContent>
           <DialogHeader>
